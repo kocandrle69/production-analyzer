@@ -152,7 +152,13 @@ function parseFile(wb, filename) {
       const raw = cell.c.map(c=>c.t||"").join(" ").trim();
       let clean = raw.includes("Comment:") ? raw.split("Comment:").pop().trim() : raw;
       if (clean && !clean.includes("Your version of Excel"))
-        comments.push({ date: rowDates[row]||null, plant: COL_PLANT[col]||null, line: hdr[col]||m[1], text: clean });
+        comments.push({
+          date:   rowDates[row]||null,
+          plant:  COL_PLANT[col]||null,
+          line:   hdr[col]||m[1],
+          text:   clean,
+          lossKs: typeof cell.v === "number" ? Math.round(cell.v) : null,
+        });
     });
   }
 
@@ -240,7 +246,10 @@ PHC-slug (for info): Beaurepaire 80.5%, Sherbrooke 79.7%, Slugs total 80.1%
 A plant is BELOW target if efficiency < its specific AOP target.
 varAOP = variance vs AOP in millions of units (Mu) — negative = behind plan.
 Total spoilage: below 12% good, above 20% serious.
-Operator/manager comments come from Excel cell notes — they describe real failure reasons.
+Manager comments come from Excel cell notes — they describe real failure reasons.
+Each comment includes loss in pieces (ks). Severity: 🔴 critical ≥50 000 ks, 🟡 warning ≥20 000 ks, 🟢 ok <20 000 ks.
+When asked about biggest losses, rank comments by lossKs descending.
+When asked about a specific date, filter comments by that date.
 With multiple files, identify recurring patterns across time periods.
 Be specific: name plant, metric, magnitude. Be concise.
 IMPORTANT: If lang=cs → respond in Czech. If lang=en → respond in English.`;
@@ -262,7 +271,12 @@ function buildCtx(cur, hist) {
       });
       if (f.comments?.length) {
         s += `  Comments (${f.comments.length}):\n`;
-        f.comments.slice(0,20).forEach(c => s += `    [${c.date||"?"}] ${c.plant||"?"} ${c.line}: ${c.text.slice(0,120)}\n`);
+        f.comments.slice(0,20).forEach(c => {
+          const sev = commentSeverity(c.lossKs);
+          const icon = sev === "critical" ? "🔴" : sev === "warning" ? "🟡" : sev === "ok" ? "🟢" : "";
+          const lossStr = c.lossKs != null ? ` | ${c.lossKs.toLocaleString()} ks ${icon}` : "";
+          s += `    [${c.date||"?"}] ${c.plant||"?"} ${c.line}${lossStr} | ${c.text.slice(0,120)}\n`;
+        });
         if (f.comments.length>20) s += `    ...+${f.comments.length-20} more\n`;
       }
     });
@@ -286,7 +300,12 @@ function buildCtx(cur, hist) {
     }
     if (cur.comments?.length) {
       s += `\nGap sheet comments (${cur.comments.length} total):\n`;
-      cur.comments.forEach(c => s += `  [${c.date||"?"}] ${c.plant||"?"} ${c.line}: ${c.text.slice(0,150)}\n`);
+      cur.comments.forEach(c => {
+        const sev = commentSeverity(c.lossKs);
+        const icon = sev === "critical" ? "🔴" : sev === "warning" ? "🟡" : sev === "ok" ? "🟢" : "";
+        const lossStr = c.lossKs != null ? ` | ${c.lossKs.toLocaleString()} ks ${icon}` : "";
+        s += `  [${c.date||"?"}] ${c.plant||"?"} ${c.line}${lossStr} | ${c.text.slice(0,150)}\n`;
+      });
     }
   }
   return s;
@@ -309,6 +328,14 @@ async function askAI(question, cur, hist, chatHist, lang) {
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
+function commentSeverity(lossKs) {
+  if (lossKs === null || lossKs === undefined) return "info";
+  const abs = Math.abs(lossKs);
+  if (abs >= 50000) return "critical";
+  if (abs >= 20000) return "warning";
+  return "ok";
+}
+
 function plantStatus(p) {
   const v = typeof p.varLatestLL === "number" ? p.varLatestLL : 0;
   const e = typeof p.efficiency === "number" ? p.efficiency : 0;
@@ -338,6 +365,7 @@ export default function App() {
   const [parsing, setParsing]   = useState(false);
   const [tab, setTab]           = useState("chat");
   const [dragOver, setDragOver] = useState(false);
+  const [sortByLoss, setSortByLoss] = useState(false);
   const fileRef  = useRef();
   const bottomRef = useRef();
   const ready    = useRef(false);
@@ -590,24 +618,45 @@ export default function App() {
               : <div style={{ flex:1, overflowY:"auto" }}>
                   <table style={{ width:"100%", borderCollapse:"collapse" }}>
                     <thead>
-                      <tr style={{ background:D.bg }}>
+                      <tr style={{ background:D.bg, position:"sticky", top:0, zIndex:1 }}>
                         {[t.date_col, t.plant_col, t.line_col, t.comments_col].map(h => (
                           <th key={h} style={{ padding:"10px 16px", fontSize:11, fontWeight:600, color:D.textSecondary,
                             textAlign:"left", borderBottom:`1px solid ${D.border}`, letterSpacing:".04em", textTransform:"uppercase" }}>{h}</th>
                         ))}
+                        <th onClick={() => setSortByLoss(s => !s)}
+                          style={{ padding:"10px 16px", fontSize:11, fontWeight:600, color: sortByLoss ? D.accent : D.textSecondary,
+                            textAlign:"right", borderBottom:`1px solid ${D.border}`, letterSpacing:".04em", textTransform:"uppercase",
+                            cursor:"pointer", whiteSpace:"nowrap", userSelect:"none" }}>
+                          {lang === "cs" ? "Ztráta" : "Loss"} {sortByLoss ? "↓" : "↕"}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {comments.map((c,i) => (
-                        <tr key={i} style={{ borderBottom:`1px solid ${D.border}` }}
-                          onMouseEnter={e=>e.currentTarget.style.background=D.bg}
-                          onMouseLeave={e=>e.currentTarget.style.background=""}>
-                          <td style={{ padding:"10px 16px", fontSize:12, color:D.textSecondary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.date||"—"}</td>
-                          <td style={{ padding:"10px 16px", fontSize:12, fontWeight:500, color:D.textPrimary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.plant||"—"}</td>
-                          <td style={{ padding:"10px 16px", fontSize:12, color:D.textSecondary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.line}</td>
-                          <td style={{ padding:"10px 16px", fontSize:13, color:D.textPrimary, lineHeight:1.55, verticalAlign:"top" }}>{c.text}</td>
-                        </tr>
-                      ))}
+                      {(sortByLoss
+                        ? [...comments].sort((a,b) => (Math.abs(b.lossKs||0)) - (Math.abs(a.lossKs||0)))
+                        : comments
+                      ).map((c,i) => {
+                        const sev = commentSeverity(c.lossKs);
+                        const sevC = sev === "critical" ? D.red : sev === "warning" ? D.amber : sev === "ok" ? D.green : null;
+                        return (
+                          <tr key={i} style={{ borderBottom:`1px solid ${D.border}` }}
+                            onMouseEnter={e=>e.currentTarget.style.background=D.bg}
+                            onMouseLeave={e=>e.currentTarget.style.background=""}>
+                            <td style={{ padding:"10px 16px", fontSize:12, color:D.textSecondary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.date||"—"}</td>
+                            <td style={{ padding:"10px 16px", fontSize:12, fontWeight:500, color:D.textPrimary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.plant||"—"}</td>
+                            <td style={{ padding:"10px 16px", fontSize:12, color:D.textSecondary, whiteSpace:"nowrap", verticalAlign:"top" }}>{c.line}</td>
+                            <td style={{ padding:"10px 16px", fontSize:13, color:D.textPrimary, lineHeight:1.55, verticalAlign:"top" }}>{c.text}</td>
+                            <td style={{ padding:"10px 16px", textAlign:"right", whiteSpace:"nowrap", verticalAlign:"top" }}>
+                              {c.lossKs != null && sevC ? (
+                                <span style={{ display:"inline-block", fontSize:11, fontWeight:600, padding:"2px 7px", borderRadius:5,
+                                  background:sevC.bg, color:sevC.txt, border:`1px solid ${sevC.brd}` }}>
+                                  {c.lossKs.toLocaleString("cs-CZ")} ks
+                                </span>
+                              ) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
