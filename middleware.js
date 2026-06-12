@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server";
-
-export function middleware(request) {
+export default function middleware(request) {
   const auth = request.headers.get("authorization") ?? "";
 
   if (auth.startsWith("Basic ")) {
@@ -9,11 +7,11 @@ export function middleware(request) {
     const validPass = process.env.AUTH_PASSWORD || "";
 
     if (validPass && user === validUser && pass === validPass) {
-      return NextResponse.next();
+      return; // pass through
     }
   }
 
-  return new NextResponse("Unauthorized", {
+  return new Response("Unauthorized", {
     status: 401,
     headers: { "WWW-Authenticate": 'Basic realm="Production Analyzer"' },
   });
