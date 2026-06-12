@@ -158,73 +158,91 @@ function parseFile(wb, filename) {
 
   // Plant summary from REPORT sheet
   const summary = [];
-  const PLANTS = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva","Beaurepaire","Sherbrooke"];
-  const PHC_ROWS = ["Cans","PG5","Slugs"];
+  const PLANTS         = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva","Beaurepaire","Sherbrooke"];
+  const AGGREGATE_ROWS = ["Cans","PG5","Slugs"];
+  const PHC_PLANTS     = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva"];
+  const PHC_CAN_PLANTS = ["Velim","Devizes","Bellegarde","Itupeva"];
   if (sheets["REPORT"]) {
     const reportRows = sheets["REPORT"];
     reportRows.forEach(row => {
       const name = String(row[1]||"").trim();
-      if (PLANTS.includes(name) || PHC_ROWS.includes(name))
+      if (PLANTS.includes(name) || AGGREGATE_ROWS.includes(name))
         summary.push({
-          plant: name,
-          production: row[2],
-          varAOP: row[3],
-          varLatestLL: row[5],
-          efficiency: row[13],
+          plant:          name,
+          production:     row[2],
+          varAOP:         row[3],
+          varLatestLL:    row[5],
+          varPlanLL:      row[7],
+          efficiency:     row[13],
+          effVarAOP:      row[14],
           efficiencyTarget: EFFICIENCY_TARGETS[name] ?? null,
-          totalSpoilage: row[20],
+          spoilageHFI:    row[18],
+          spoilageMfg:    row[19],
+          totalSpoilage:  row[20],
           spoilageVarAOP: row[21],
-          isPHC: PHC_ROWS.includes(name),
-          isSlug: ["Llinars","Lummen","SLP"].includes(name),
+          spoilageCans:   row[24],
+          operatingDays:  row[59],
+          isPHC:          PHC_PLANTS.includes(name),
+          isPHCCan:       PHC_CAN_PLANTS.includes(name),
+          isSlug:         ["Llinars","Lummen","SLP","Beaurepaire","Sherbrooke"].includes(name),
+          isAggregate:    AGGREGATE_ROWS.includes(name),
         });
     });
+  }
+
+  // Monthly plan targets from LLPRODN sheet
+  const monthlyPlan = {};
+  if (sheets["LLPRODN"]) {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const planRow = sheets["LLPRODN"].find(r => String(r[0]||"").trim() === "Total Cans");
+    if (planRow) months.forEach((m, i) => { monthlyPlan[m] = planRow[37 + i]; });
   }
 
   let period = null;
   if (sheets["SELECT"]) for (const row of sheets["SELECT"])
     if (String(row[1]).includes("INPUT YEAR")) { period = String(row[4]); break; }
 
-  return { filename, summary, comments, period, uploadedAt: new Date().toISOString() };
+  return { filename, summary, comments, period, monthlyPlan, uploadedAt: new Date().toISOString() };
 }
 
 /* ── Efficiency targets (AOP, June 2026) ─────────────────────────────────── */
 const EFFICIENCY_TARGETS = {
+  // PHC can plants — primary focus
   "Velim":       0.649,
   "Devizes":     0.562,
   "Bellegarde":  0.515,
+  "Itupeva":     0.702,
+  // PHC slug plants — info only
   "Llinars":     0.586,
   "Lummen":      0.550,
   "SLP":         0.479,
-  "Itupeva":     0.702,
+  // PHC aggregate rows
+  "Cans":        0.585,  // all 7 PHC plants — KEY metric
+  "PG5":         0.605,  // Cans + Slugs
+  // Non-PHC slug plants
   "Beaurepaire": 0.805,
   "Sherbrooke":  0.797,
-  "Cans":        0.585,
-  "PG5":         0.605,
-  "Slugs":       0.801,
+  "Slugs":       0.801,  // Beaurepaire + Sherbrooke
 };
 
 /* ── AI ───────────────────────────────────────────────────────────────────── */
 const SYS = `You are a production analytics expert for Ball Corporation aerosol can manufacturing.
 
-Plants and their June 2026 AOP efficiency targets:
-- Velim (CZ): 64.9% ← primary can plant
-- Devizes (UK): 56.2% ← primary can plant
-- Bellegarde (FR): 51.5% ← primary can plant
-- Itupeva (BR): 70.2% ← primary can plant
-- PHC Cans: 58.5% ← KEY metric, always highlight
-- Llinars (ES): 58.6% — slug plant (info only)
-- Lummen (BE): 55.0% — slug plant (info only)
-- SLP (MX): 47.9% — slug plant (info only)
-- Beaurepaire (FR): 80.5% — for info
-- Sherbrooke (CA): 79.7% — for info
-- PHC PG5: 60.5% — for info
-- PHC Slugs: 80.1% — for info
+Plant structure:
+PHC group = Velim (CZ), Devizes (UK), Bellegarde (FR), Itupeva (BR) [can plants] + Llinars (ES), Lummen (BE), SLP (MX) [slug plants].
+Non-PHC: Beaurepaire (FR), Sherbrooke (CA) [slug plants].
+Aggregate rows: Cans = all 7 PHC plants, PG5 = Cans + Slugs, Slugs = Beaurepaire + Sherbrooke.
 
-Priority: Focus on Velim, Devizes, Bellegarde, Itupeva and PHC Cans.
-Slug plants (Llinars, Lummen, SLP) mention only briefly.
+June 2026 AOP efficiency targets:
+PHC can plants (PRIMARY focus): Velim 64.9%, Devizes 56.2%, Bellegarde 51.5%, Itupeva 70.2%
+PHC aggregate — KEY metric, always highlight: Cans 58.5%, PG5 60.5%
+PHC slug plants (brief mention only): Llinars 58.6%, Lummen 55.0%, SLP 47.9%
+Non-PHC (for info): Beaurepaire 80.5%, Sherbrooke 79.7%, Slugs total 80.1%
+
 A plant is BELOW target if efficiency < its specific AOP target.
+varAOP = variance vs AOP in millions of units (Mu) — negative = behind plan.
 Total spoilage: below 12% good, above 20% serious.
-Operator comments come from Excel cell notes — they describe real failure reasons.
+Operator/manager comments come from Excel cell notes — they describe real failure reasons.
 With multiple files, identify recurring patterns across time periods.
 Be specific: name plant, metric, magnitude. Be concise.
 IMPORTANT: If lang=cs → respond in Czech. If lang=en → respond in English.`;
@@ -236,12 +254,13 @@ function buildCtx(cur, hist) {
     hist.forEach(f => {
       s += `\n[${f.filename} | ${f.period||"?"} | ${f.uploadedAt?.slice(0,10)}]\n`;
       f.summary?.forEach(p => {
-        const e = typeof p.efficiency === "number" ? (p.efficiency * 100).toFixed(1) + "%" : "?";
+        const e   = typeof p.efficiency === "number" ? (p.efficiency * 100).toFixed(1) + "%" : "?";
         const tgt = typeof p.efficiencyTarget === "number" ? (p.efficiencyTarget * 100).toFixed(1) + "%" : "?";
-        const v = typeof p.varLatestLL === "number" ? (p.varLatestLL > 0 ? "+" : "") + p.varLatestLL.toFixed(2) + "M" : "?";
-        const sp = typeof p.totalSpoilage === "number" ? (p.totalSpoilage * 100).toFixed(1) + "%" : "?";
-        const flag = p.isPHC ? " [PHC]" : p.isSlug ? " [slug]" : "";
-        s += `  ${p.plant}${flag}: prod ${typeof p.production === "number" ? p.production.toFixed(1) + "M" : "?"}, eff ${e} (target ${tgt}), vs LL ${v}, spoilage ${sp}\n`;
+        const vAOP = typeof p.varAOP === "number" ? (p.varAOP > 0 ? "+" : "") + p.varAOP.toFixed(2) + "M" : "?";
+        const vLL  = typeof p.varLatestLL === "number" ? (p.varLatestLL > 0 ? "+" : "") + p.varLatestLL.toFixed(2) + "M" : "?";
+        const sp  = typeof p.totalSpoilage === "number" ? (p.totalSpoilage * 100).toFixed(1) + "%" : "?";
+        const flag = p.isAggregate ? " [AGG]" : p.isPHCCan ? " [PHC-can]" : p.isPHC ? " [PHC-slug]" : " [non-PHC]";
+        s += `  ${p.plant}${flag}: prod ${typeof p.production === "number" ? p.production.toFixed(1) + "M" : "?"}, eff ${e} (target ${tgt}), vsAOP ${vAOP}, vsLL ${vLL}, spoilage ${sp}\n`;
       });
       if (f.comments?.length) {
         s += `  Comments (${f.comments.length}):\n`;
@@ -253,13 +272,20 @@ function buildCtx(cur, hist) {
   if (cur) {
     s += `\n=== CURRENT FILE: ${cur.filename} ===\n`;
     cur.summary?.forEach(p => {
-      const e = typeof p.efficiency === "number" ? (p.efficiency * 100).toFixed(1) + "%" : "?";
+      const e   = typeof p.efficiency === "number" ? (p.efficiency * 100).toFixed(1) + "%" : "?";
       const tgt = typeof p.efficiencyTarget === "number" ? (p.efficiencyTarget * 100).toFixed(1) + "%" : "?";
-      const v = typeof p.varLatestLL === "number" ? (p.varLatestLL > 0 ? "+" : "") + p.varLatestLL.toFixed(2) + "M" : "?";
-      const sp = typeof p.totalSpoilage === "number" ? (p.totalSpoilage * 100).toFixed(1) + "%" : "?";
-      const flag = p.isPHC ? " [PHC]" : p.isSlug ? " [slug]" : "";
-      s += `${p.plant}${flag}: prod ${typeof p.production === "number" ? p.production.toFixed(1) + "M" : "?"}, eff ${e} (target ${tgt}), vs LL ${v}, spoilage ${sp}\n`;
+      const vAOP = typeof p.varAOP === "number" ? (p.varAOP > 0 ? "+" : "") + p.varAOP.toFixed(2) + "M" : "?";
+      const vLL  = typeof p.varLatestLL === "number" ? (p.varLatestLL > 0 ? "+" : "") + p.varLatestLL.toFixed(2) + "M" : "?";
+      const sp  = typeof p.totalSpoilage === "number" ? (p.totalSpoilage * 100).toFixed(1) + "%" : "?";
+      const flag = p.isAggregate ? " [AGG]" : p.isPHCCan ? " [PHC-can]" : p.isPHC ? " [PHC-slug]" : " [non-PHC]";
+      s += `${p.plant}${flag}: prod ${typeof p.production === "number" ? p.production.toFixed(1) + "M" : "?"}, eff ${e} (target ${tgt}), vsAOP ${vAOP}, vsLL ${vLL}, spoilage ${sp}\n`;
     });
+    if (cur.monthlyPlan && Object.keys(cur.monthlyPlan).length) {
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const planStr = months.filter(m => cur.monthlyPlan[m] != null)
+        .map(m => `${m}: ${typeof cur.monthlyPlan[m] === "number" ? cur.monthlyPlan[m].toFixed(1)+"M" : cur.monthlyPlan[m]}`).join(", ");
+      s += `PHC Total Cans AOP monthly plan: ${planStr}\n`;
+    }
     if (cur.comments?.length) {
       s += `\nGap sheet comments (${cur.comments.length} total):\n`;
       cur.comments.forEach(c => s += `  [${c.date||"?"}] ${c.plant||"?"} ${c.line}: ${c.text.slice(0,150)}\n`);
