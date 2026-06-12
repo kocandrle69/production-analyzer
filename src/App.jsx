@@ -315,10 +315,10 @@ export default function App() {
 
   /* ── Render ─────────────────────────────────────────────────────────────── */
   return (
-    <div style={{ minHeight:"100vh", background:D.bg, padding:"0" }}>
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:D.bg, overflow:"hidden" }}>
 
       {/* Top bar */}
-      <div style={{ background:D.surface, borderBottom:`1px solid ${D.border}`, padding:"0 24px", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:10 }}>
+      <div style={{ background:D.surface, borderBottom:`1px solid ${D.border}`, padding:"0 24px", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0, zIndex:10 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <div style={{ width:32, height:32, borderRadius:8, background:D.accentBg, display:"flex", alignItems:"center", justifyContent:"center" }}>
             <span style={{ fontSize:16 }}>📊</span>
@@ -358,7 +358,7 @@ export default function App() {
       </div>
 
       {/* Main */}
-      <div style={{ maxWidth:900, margin:"0 auto", padding:"24px 20px" }}>
+      <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", maxWidth:900, width:"100%", margin:"0 auto", padding:"20px 20px 16px" }}>
 
         {/* Drop zone */}
         {!cur && hist.length===0 && (
@@ -436,10 +436,10 @@ export default function App() {
 
         {/* Chat panel */}
         {tab === "chat" && (
-          <div style={{ background:D.surface, border:`1px solid ${D.border}`, borderTop:"none",
+          <div style={{ flex:1, display:"flex", flexDirection:"column", background:D.surface, border:`1px solid ${D.border}`, borderTop:"none",
             borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
             {/* Messages */}
-            <div style={{ minHeight:200, maxHeight:420, overflowY:"auto", padding:"20px 20px 8px" }}>
+            <div style={{ flex:1, overflowY:"auto", padding:"20px 20px 8px" }}>
               {msgs.map((m,i) => (
                 <div key={i} style={{ marginBottom:16, display:"flex", gap:10, alignItems:"flex-start",
                   flexDirection: m.role==="user"?"row-reverse":"row" }}>
@@ -469,7 +469,7 @@ export default function App() {
               <div ref={bottomRef} />
             </div>
             {/* Quick questions */}
-            <div style={{ padding:"0 20px 10px", display:"flex", flexWrap:"wrap", gap:6 }}>
+            <div style={{ padding:"8px 20px 10px", display:"flex", flexWrap:"wrap", gap:6, flexShrink:0, borderTop:`1px solid ${D.border}` }}>
               {t.quick.map(q => (
                 <button key={q} onClick={() => send(q)} disabled={loading}
                   style={{ border:`1px solid ${D.border}`, borderRadius:20, background:D.bg,
@@ -482,7 +482,7 @@ export default function App() {
               ))}
             </div>
             {/* Input */}
-            <div style={{ padding:"0 16px 16px", display:"flex", gap:8 }}>
+            <div style={{ padding:"10px 16px 16px", display:"flex", gap:8, flexShrink:0 }}>
               <input value={input} onChange={e=>setInput(e.target.value)}
                 onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send(input)}
                 placeholder={t.input_placeholder} disabled={loading}
@@ -504,10 +504,10 @@ export default function App() {
 
         {/* Comments panel */}
         {tab === "comments" && (
-          <div style={{ background:D.surface, border:`1px solid ${D.border}`, borderTop:"none", borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
+          <div style={{ flex:1, display:"flex", flexDirection:"column", background:D.surface, border:`1px solid ${D.border}`, borderTop:"none", borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
             {comments.length === 0
               ? <div style={{ padding:"40px", textAlign:"center", color:D.textSecondary, fontSize:13 }}>{t.no_comments}</div>
-              : <div style={{ maxHeight:500, overflowY:"auto" }}>
+              : <div style={{ flex:1, overflowY:"auto" }}>
                   <table style={{ width:"100%", borderCollapse:"collapse" }}>
                     <thead>
                       <tr style={{ background:D.bg }}>
@@ -537,11 +537,11 @@ export default function App() {
 
         {/* History panel */}
         {tab === "history" && (
-          <div style={{ background:D.surface, border:`1px solid ${D.border}`, borderTop:"none", borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
+          <div style={{ flex:1, display:"flex", flexDirection:"column", background:D.surface, border:`1px solid ${D.border}`, borderTop:"none", borderRadius:"0 0 12px 12px", overflow:"hidden" }}>
             {hist.length === 0
               ? <div style={{ padding:"40px", textAlign:"center", color:D.textSecondary, fontSize:13 }}>{t.no_history}</div>
               : <>
-                  <div style={{ maxHeight:500, overflowY:"auto" }}>
+                  <div style={{ flex:1, overflowY:"auto" }}>
                     {[...hist].reverse().map((h,i) => (
                       <div key={i} style={{ padding:"14px 20px", borderBottom:`1px solid ${D.border}` }}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, marginBottom:10 }}>
