@@ -160,8 +160,8 @@ function parseFile(wb, filename) {
   const summary = [];
   const PLANTS         = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva","Beaurepaire","Sherbrooke"];
   const AGGREGATE_ROWS = ["Cans","PG5","Slugs"];
-  const PHC_PLANTS     = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva"];
-  const PHC_CAN_PLANTS = ["Velim","Devizes","Bellegarde","Itupeva"];
+  const PHC_CAN_PLANTS = ["Velim","Devizes","Bellegarde","Itupeva","Llinars","Lummen","SLP"];
+  const PHC_SLUG_PLANTS = ["Beaurepaire","Sherbrooke"];
   if (sheets["REPORT"]) {
     const reportRows = sheets["REPORT"];
     reportRows.forEach(row => {
@@ -182,10 +182,9 @@ function parseFile(wb, filename) {
           spoilageVarAOP: row[21],
           spoilageCans:   row[24],
           operatingDays:  row[59],
-          isPHC:          PHC_PLANTS.includes(name),
-          isPHCCan:       PHC_CAN_PLANTS.includes(name),
-          isSlug:         ["Llinars","Lummen","SLP","Beaurepaire","Sherbrooke"].includes(name),
-          isAggregate:    AGGREGATE_ROWS.includes(name),
+          isPHCCan:    PHC_CAN_PLANTS.includes(name),
+          isPHCSlug:   PHC_SLUG_PLANTS.includes(name),
+          isAggregate: AGGREGATE_ROWS.includes(name),
         });
     });
   }
@@ -229,15 +228,14 @@ const EFFICIENCY_TARGETS = {
 const SYS = `You are a production analytics expert for Ball Corporation aerosol can manufacturing.
 
 Plant structure:
-PHC group = Velim (CZ), Devizes (UK), Bellegarde (FR), Itupeva (BR) [can plants] + Llinars (ES), Lummen (BE), SLP (MX) [slug plants].
-Non-PHC: Beaurepaire (FR), Sherbrooke (CA) [slug plants].
-Aggregate rows: Cans = all 7 PHC plants, PG5 = Cans + Slugs, Slugs = Beaurepaire + Sherbrooke.
+PHC-can plants: Velim (CZ), Devizes (UK), Bellegarde (FR), Itupeva (BR), Llinars (ES), Lummen (BE), SLP (MX).
+PHC-slug plants: Beaurepaire (FR), Sherbrooke (CA).
+Aggregate rows: Cans = all 7 PHC-can plants, Slugs = Beaurepaire + Sherbrooke, PG5 = Cans + Slugs.
 
 June 2026 AOP efficiency targets:
-PHC can plants (PRIMARY focus): Velim 64.9%, Devizes 56.2%, Bellegarde 51.5%, Itupeva 70.2%
-PHC aggregate — KEY metric, always highlight: Cans 58.5%, PG5 60.5%
-PHC slug plants (brief mention only): Llinars 58.6%, Lummen 55.0%, SLP 47.9%
-Non-PHC (for info): Beaurepaire 80.5%, Sherbrooke 79.7%, Slugs total 80.1%
+PHC-can (PRIMARY focus): Velim 64.9%, Devizes 56.2%, Bellegarde 51.5%, Itupeva 70.2%, Llinars 58.6%, Lummen 55.0%, SLP 47.9%
+PHC aggregate — KEY metric: Cans 58.5%, PG5 60.5%
+PHC-slug (for info): Beaurepaire 80.5%, Sherbrooke 79.7%, Slugs total 80.1%
 
 A plant is BELOW target if efficiency < its specific AOP target.
 varAOP = variance vs AOP in millions of units (Mu) — negative = behind plan.
@@ -259,7 +257,7 @@ function buildCtx(cur, hist) {
         const vAOP = typeof p.varAOP === "number" ? (p.varAOP > 0 ? "+" : "") + p.varAOP.toFixed(2) + "M" : "?";
         const vLL  = typeof p.varLatestLL === "number" ? (p.varLatestLL > 0 ? "+" : "") + p.varLatestLL.toFixed(2) + "M" : "?";
         const sp  = typeof p.totalSpoilage === "number" ? (p.totalSpoilage * 100).toFixed(1) + "%" : "?";
-        const flag = p.isAggregate ? " [AGG]" : p.isPHCCan ? " [PHC-can]" : p.isPHC ? " [PHC-slug]" : " [non-PHC]";
+        const flag = p.isAggregate ? " [AGG]" : p.isPHCCan ? " [PHC-can]" : p.isPHCSlug ? " [PHC-slug]" : "";
         s += `  ${p.plant}${flag}: prod ${typeof p.production === "number" ? p.production.toFixed(1) + "M" : "?"}, eff ${e} (target ${tgt}), vsAOP ${vAOP}, vsLL ${vLL}, spoilage ${sp}\n`;
       });
       if (f.comments?.length) {
