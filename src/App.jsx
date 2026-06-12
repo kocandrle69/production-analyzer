@@ -128,7 +128,54 @@ const COL_PLANT = {
   40:"Llinars",41:"Llinars",42:"Llinars",43:"Llinars",44:"Llinars",45:"Llinars",
 };
 
-function parseFile(wb, filename) {
+async function parseThreadedComments(buf) {
+  const bytes = new Uint8Array(buf);
+  const view  = new DataView(buf);
+  const result = {};
+  let pos = 0;
+  while (pos < bytes.length - 30) {
+    if (view.getUint32(pos, false) !== 0x504B0304) { pos++; continue; }
+    const compression  = view.getUint16(pos + 8, true);
+    const compressedSz = view.getUint32(pos + 18, true);
+    const fileNameLen  = view.getUint16(pos + 26, true);
+    const extraLen     = view.getUint16(pos + 28, true);
+    const fileName     = new TextDecoder().decode(bytes.slice(pos + 30, pos + 30 + fileNameLen));
+    const dataStart    = pos + 30 + fileNameLen + extraLen;
+    if (fileName.toLowerCase().includes("threadedcomment")) {
+      const compressed = bytes.slice(dataStart, dataStart + compressedSz);
+      let xml = "";
+      try {
+        if (compression === 0) {
+          xml = new TextDecoder().decode(compressed);
+        } else if (compression === 8 && typeof DecompressionStream !== "undefined") {
+          const ds = new DecompressionStream("deflate-raw");
+          const w = ds.writable.getWriter(), r = ds.readable.getReader();
+          w.write(compressed); w.close();
+          const chunks = [];
+          for (;;) { const { done, value } = await r.read(); if (done) break; chunks.push(value); }
+          const out = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
+          let off = 0; chunks.forEach(c => { out.set(c, off); off += c.length; });
+          xml = new TextDecoder().decode(out);
+        }
+      } catch { /* ignore */ }
+      if (xml) {
+        for (const block of xml.matchAll(/<threadedComment([^>]*?)>([\s\S]*?)<\/threadedComment>/g)) {
+          const [, attrs, content] = block;
+          if (/parentId="/.test(attrs)) continue; // skip replies, keep only root comments
+          const refM = attrs.match(/ref="([^"]+)"/); if (!refM) continue;
+          const parts = [...content.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)]
+            .map(m => m[1].replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/&#xA;/g,"\n").trim());
+          const text = parts.join(" ").trim();
+          if (text) result[refM[1]] = text;
+        }
+      }
+    }
+    pos = dataStart + (compressedSz || 1);
+  }
+  return result;
+}
+
+function parseFile(wb, filename, tcMap = {}) {
   const sheets = {};
   wb.SheetNames.forEach(n => { sheets[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { header:1, defval:"" }); });
 
@@ -170,7 +217,10 @@ function parseFile(wb, filename) {
       if (clean && !clean.includes("Your version of Excel")) pushComment(a, clean);
     });
 
-    // Approach 2: threaded comments via !comments (modern Excel)
+    // Approach 2: threaded comments from raw zip parsing
+    Object.entries(tcMap).forEach(([ref, text]) => pushComment(ref, text));
+
+    // Approach 3: SheetJS !comments fallback
     const tc = gapWs["!comments"];
     if (tc) {
       const arr = Array.isArray(tc)
@@ -410,8 +460,10 @@ export default function App() {
     if (!f) return;
     setParsing(true);
     try {
-      const wb = XLSX.read(await f.arrayBuffer(), { type:"array", cellNotes: true });
-      const parsed = parseFile(wb, f.name);
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type:"array", cellNotes: true });
+      const tcMap = await parseThreadedComments(buf);
+      const parsed = parseFile(wb, f.name, tcMap);
       setCur(parsed);
       const newH = [...hist.filter(h=>h.filename!==f.name), parsed].slice(-10);
       setHist(newH); await saveHistory(newH);
