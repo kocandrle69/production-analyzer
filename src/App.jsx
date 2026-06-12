@@ -159,11 +159,23 @@ function parseFile(wb, filename) {
   // Plant summary from REPORT sheet
   const summary = [];
   const PLANTS = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva","Beaurepaire","Sherbrooke"];
-  if (sheets["REPORT"]) sheets["REPORT"].forEach(row => {
-    if (PLANTS.includes(String(row[1]||"").trim()))
-      summary.push({ plant:String(row[1]).trim(), production:row[2], varAOP:row[3], varLatestLL:row[5],
-        efficiency:row[13], totalSpoilage:row[20], spoilageVarAOP:row[21] });
-  });
+  if (sheets["REPORT"]) {
+    const reportRows = sheets["REPORT"];
+    // Find "Forecast Efficiency" column by scanning header rows
+    let forecastEffCol = -1;
+    for (let i = 0; i < Math.min(6, reportRows.length); i++) {
+      const idx = reportRows[i].findIndex(cell =>
+        String(cell).toLowerCase().includes("forecast") && String(cell).toLowerCase().includes("eff")
+      );
+      if (idx >= 0) { forecastEffCol = idx; break; }
+    }
+    reportRows.forEach(row => {
+      if (PLANTS.includes(String(row[1]||"").trim()))
+        summary.push({ plant:String(row[1]).trim(), production:row[2], varAOP:row[3], varLatestLL:row[5],
+          efficiency:row[13], efficiencyTarget: forecastEffCol >= 0 ? row[forecastEffCol] : null,
+          totalSpoilage:row[20], spoilageVarAOP:row[21] });
+    });
+  }
 
   let period = null;
   if (sheets["SELECT"]) for (const row of sheets["SELECT"])
@@ -234,10 +246,11 @@ async function askAI(question, cur, hist, chatHist, lang) {
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 function plantStatus(p) {
-  const v = typeof p.varLatestLL==="number"?p.varLatestLL:0;
-  const e = typeof p.efficiency==="number"?p.efficiency:0.5;
-  if (v<-1.5||e<0.42) return "red";
-  if (v<-0.5||e<0.48) return "amber";
+  const v = typeof p.varLatestLL==="number" ? p.varLatestLL : 0;
+  const e = typeof p.efficiency==="number" ? p.efficiency : 0.5;
+  const target = typeof p.efficiencyTarget==="number" && p.efficiencyTarget > 0 ? p.efficiencyTarget : 0.60;
+  if (v < -1.5 || e < target - 0.15) return "red";
+  if (v < -0.5 || e < target - 0.05) return "amber";
   return "green";
 }
 
@@ -402,6 +415,8 @@ export default function App() {
               const eff = typeof p.efficiency==="number"?(p.efficiency*100).toFixed(0)+"%":"?";
               const v   = typeof p.varLatestLL==="number"?(p.varLatestLL>0?"+":"")+p.varLatestLL.toFixed(1)+"M":"?";
               const spoil = typeof p.totalSpoilage==="number"?(p.totalSpoilage*100).toFixed(1)+"%":null;
+              const tgt = typeof p.efficiencyTarget==="number" && p.efficiencyTarget>0
+                ? "cíl "+( p.efficiencyTarget*100).toFixed(0)+"%" : null;
               return (
                 <button key={p.plant} onClick={() => send(t.detail_prompt(p.plant))}
                   style={{ background:c.bg, border:`1.5px solid ${c.brd}`, borderRadius:10, padding:"12px 14px",
@@ -411,6 +426,7 @@ export default function App() {
                   onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,.05)";}}>
                   <div style={{ fontSize:12, fontWeight:600, color:c.txt, marginBottom:6 }}>{p.plant}</div>
                   <div style={{ fontSize:13, fontWeight:700, color:c.sub }}>{eff}</div>
+                  {tgt && <div style={{ fontSize:10, color:c.txt, marginTop:1, opacity:.7 }}>{tgt}</div>}
                   <div style={{ fontSize:11, color:c.txt, marginTop:2, opacity:.8 }}>{v} {t.vs_ll}</div>
                   {spoil && <div style={{ fontSize:10, color:c.sub, marginTop:3, opacity:.7 }}>⚠ {spoil}</div>}
                 </button>
