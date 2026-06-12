@@ -145,21 +145,41 @@ function parseFile(wb, filename) {
       const c = mtdWs[a]; if (c && typeof c.v==="number" && c.v>46000) rowDates[parseInt(a.slice(1))] = excelDateToStr(c.v);
     });
     keys.forEach(a => { const m = a.match(/^A(\d+)$/); const c = gapWs[a]; if (m && c && typeof c.v==="number" && c.v>46000) rowDates[parseInt(m[1])] = excelDateToStr(c.v); });
-    keys.forEach(a => {
-      const m = a.match(/^([A-Z]+)(\d+)$/); if (!m) return;
-      const cell = gapWs[a]; if (!cell?.c) return;
+
+    const seen = new Set();
+    const pushComment = (ref, text) => {
+      if (!text || seen.has(ref)) return;
+      seen.add(ref);
+      const m = ref.match(/^([A-Z]+)(\d+)$/); if (!m) return;
       const col = XLSX.utils.decode_col(m[1])+1, row = parseInt(m[2]);
-      const raw = cell.c.map(c=>c.t||"").join(" ").trim();
-      let clean = raw.includes("Comment:") ? raw.split("Comment:").pop().trim() : raw;
-      if (clean && !clean.includes("Your version of Excel"))
-        comments.push({
-          date:   rowDates[row]||null,
-          plant:  COL_PLANT[col]||null,
-          line:   hdr[col]||m[1],
-          text:   clean,
-          lossKs: typeof cell.v === "number" ? Math.round(cell.v) : null,
-        });
+      const cell = gapWs[ref] || {};
+      comments.push({
+        date:   rowDates[row]||null,
+        plant:  COL_PLANT[col]||null,
+        line:   hdr[col]||m[1],
+        text:   text.trim(),
+        lossKs: typeof cell.v === "number" ? Math.round(cell.v) : null,
+      });
+    };
+
+    // Approach 1: legacy notes via cell.c (classic Excel comments)
+    keys.forEach(a => {
+      const cell = gapWs[a]; if (!cell?.c) return;
+      const raw = cell.c.map(c => c.t||"").join(" ").trim();
+      const clean = raw.includes("Comment:") ? raw.split("Comment:").pop().trim() : raw;
+      if (clean && !clean.includes("Your version of Excel")) pushComment(a, clean);
     });
+
+    // Approach 2: threaded comments via !comments (modern Excel)
+    const tc = gapWs["!comments"];
+    if (tc) {
+      const arr = Array.isArray(tc)
+        ? tc
+        : Object.entries(tc).flatMap(([ref, v]) =>
+            (Array.isArray(v) ? v : [v]).map(x => ({ ref, ...x }))
+          );
+      arr.forEach(({ ref, t }) => { if (ref && t) pushComment(ref, t); });
+    }
   }
 
   // Plant summary from REPORT sheet
@@ -390,7 +410,7 @@ export default function App() {
     if (!f) return;
     setParsing(true);
     try {
-      const wb = XLSX.read(await f.arrayBuffer(), { type:"array" });
+      const wb = XLSX.read(await f.arrayBuffer(), { type:"array", cellNotes: true });
       const parsed = parseFile(wb, f.name);
       setCur(parsed);
       const newH = [...hist.filter(h=>h.filename!==f.name), parsed].slice(-10);
