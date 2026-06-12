@@ -193,6 +193,16 @@ function parseFile(wb, filename, tcMap = {}) {
     });
     keys.forEach(a => { const m = a.match(/^A(\d+)$/); const c = gapWs[a]; if (m && c && typeof c.v==="number" && c.v>46000) rowDates[parseInt(m[1])] = excelDateToStr(c.v); });
 
+    // Diagnostic: log header row to verify COL_PLANT mapping
+    if (import.meta.env.DEV) {
+      const headerCols = {};
+      Object.keys(gapWs).filter(k => k.match(/^[A-Z]+3$/)).forEach(a => {
+        const col = XLSX.utils.decode_col(a.replace("3",""))+1;
+        headerCols[col] = { letter: a.replace("3",""), name: String(gapWs[a]?.v||""), plant: COL_PLANT[col]||"—" };
+      });
+      console.table(headerCols);
+    }
+
     const seen = new Set();
     const pushComment = (ref, text) => {
       if (!text || seen.has(ref)) return;
@@ -235,7 +245,7 @@ function parseFile(wb, filename, tcMap = {}) {
   // Plant summary from REPORT sheet
   const summary = [];
   const PLANTS         = ["Velim","Devizes","Bellegarde","Llinars","Lummen","SLP","Itupeva","Beaurepaire","Sherbrooke"];
-  const AGGREGATE_ROWS = ["Cans","PG5","Slugs"];
+  const AGGREGATE_ROWS = ["Cans","Slugs"];
   const PHC_CAN_PLANTS = ["Velim","Devizes","Bellegarde","Itupeva","Llinars","Lummen","SLP"];
   const PHC_SLUG_PLANTS = ["Beaurepaire","Sherbrooke"];
   if (sheets["REPORT"]) {
@@ -293,7 +303,6 @@ const EFFICIENCY_TARGETS = {
   "SLP":         0.479,
   // PHC aggregate rows
   "Cans":        0.585,  // all 7 PHC plants — KEY metric
-  "PG5":         0.605,  // Cans + Slugs
   // Non-PHC slug plants
   "Beaurepaire": 0.805,
   "Sherbrooke":  0.797,
@@ -306,11 +315,11 @@ const SYS = `You are a production analytics expert for Ball Corporation aerosol 
 Plant structure:
 PHC-can plants: Velim (CZ), Devizes (UK), Bellegarde (FR), Itupeva (BR), Llinars (ES), Lummen (BE), SLP (MX).
 PHC-slug plants: Beaurepaire (FR), Sherbrooke (CA).
-Aggregate rows: Cans = all 7 PHC-can plants, Slugs = Beaurepaire + Sherbrooke, PG5 = Cans + Slugs.
+Aggregate rows: Cans = all 7 PHC-can plants, Slugs = Beaurepaire + Sherbrooke.
 
 June 2026 AOP efficiency targets:
 PHC-can (PRIMARY focus): Velim 64.9%, Devizes 56.2%, Bellegarde 51.5%, Itupeva 70.2%, Llinars 58.6%, Lummen 55.0%, SLP 47.9%
-PHC aggregate — KEY metric: Cans 58.5%, PG5 60.5%
+PHC aggregate — KEY metric: Cans 58.5%
 PHC-slug (for info): Beaurepaire 80.5%, Sherbrooke 79.7%, Slugs total 80.1%
 
 A plant is BELOW target if efficiency < its specific AOP target.
@@ -572,32 +581,58 @@ export default function App() {
         )}
 
         {/* Plant cards */}
-        {plants.length > 0 && (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(140px,1fr))", gap:10, marginBottom:20 }}>
-            {plants.map(p => {
-              const s = plantStatus(p); const c = D[s];
-              const eff = typeof p.efficiency==="number"?(p.efficiency*100).toFixed(0)+"%":"?";
-              const v   = typeof p.varLatestLL==="number"?(p.varLatestLL>0?"+":"")+p.varLatestLL.toFixed(1)+"M":"?";
-              const spoil = typeof p.totalSpoilage==="number"?(p.totalSpoilage*100).toFixed(1)+"%":null;
-              const tgt = typeof p.efficiencyTarget==="number" && p.efficiencyTarget>0
-                ? "cíl "+( p.efficiencyTarget*100).toFixed(0)+"%" : null;
-              return (
-                <button key={p.plant} onClick={() => send(t.detail_prompt(p.plant))}
-                  style={{ background:c.bg, border:`1.5px solid ${c.brd}`, borderRadius:10, padding:"12px 14px",
-                    cursor:"pointer", textAlign:"left", transition:"transform .1s, box-shadow .1s",
-                    boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}
-                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.1)";}}
-                  onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,.05)";}}>
-                  <div style={{ fontSize:12, fontWeight:600, color:c.txt, marginBottom:6 }}>{p.plant}</div>
-                  <div style={{ fontSize:13, fontWeight:700, color:c.sub }}>{eff}</div>
-                  {tgt && <div style={{ fontSize:10, color:c.txt, marginTop:1, opacity:.7 }}>{tgt}</div>}
-                  <div style={{ fontSize:11, color:c.txt, marginTop:2, opacity:.8 }}>{v} {t.vs_ll}</div>
-                  {spoil && <div style={{ fontSize:10, color:c.sub, marginTop:3, opacity:.7 }}>⚠ {spoil}</div>}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {plants.length > 0 && (() => {
+          const individual = plants.filter(p => !p.isAggregate);
+          const cans  = plants.find(p => p.plant === "Cans");
+          const slugs = plants.find(p => p.plant === "Slugs");
+
+          const PlantCard = ({ p, wide = false }) => {
+            const s = plantStatus(p); const c = D[s];
+            const eff   = typeof p.efficiency==="number" ? (p.efficiency*100).toFixed(0)+"%" : "?";
+            const v     = typeof p.varLatestLL==="number" ? (p.varLatestLL>0?"+":"")+p.varLatestLL.toFixed(1)+"M" : "?";
+            const vAOP  = typeof p.varAOP==="number" ? (p.varAOP>0?"+":"")+p.varAOP.toFixed(1)+"M" : null;
+            const spoil = typeof p.totalSpoilage==="number" ? (p.totalSpoilage*100).toFixed(1)+"%" : null;
+            const tgt   = typeof p.efficiencyTarget==="number" ? "cíl "+(p.efficiencyTarget*100).toFixed(0)+"%" : null;
+            return (
+              <button key={p.plant} onClick={() => send(t.detail_prompt(p.plant))}
+                style={{ background:c.bg, border:`${wide?"2px":"1.5px"} solid ${c.brd}`, borderRadius:10,
+                  padding: wide ? "14px 20px" : "12px 14px",
+                  cursor:"pointer", textAlign:"left", transition:"transform .1s, box-shadow .1s",
+                  boxShadow:"0 1px 3px rgba(0,0,0,.05)" }}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.1)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,.05)";}}>
+                <div style={{ display:"flex", alignItems:"baseline", gap:8, marginBottom:4 }}>
+                  <div style={{ fontSize: wide?13:12, fontWeight:600, color:c.txt }}>{p.plant}</div>
+                  {wide && <div style={{ fontSize:10, color:c.txt, opacity:.6, fontWeight:400 }}>aggregate</div>}
+                </div>
+                <div style={{ fontSize: wide?15:13, fontWeight:700, color:c.sub }}>{eff}</div>
+                {tgt && <div style={{ fontSize:10, color:c.txt, marginTop:1, opacity:.7 }}>{tgt}</div>}
+                <div style={{ fontSize:11, color:c.txt, marginTop:2, opacity:.8 }}>{v} {t.vs_ll}</div>
+                {vAOP && <div style={{ fontSize:10, color:c.txt, marginTop:1, opacity:.7 }}>{vAOP} vs AOP</div>}
+                {spoil && <div style={{ fontSize:10, color:c.sub, marginTop:3, opacity:.7 }}>⚠ {spoil}</div>}
+              </button>
+            );
+          };
+
+          return (
+            <div style={{ marginBottom:16 }}>
+              {/* Individual plants */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(130px,1fr))", gap:8, marginBottom:10 }}>
+                {individual.map(p => <PlantCard key={p.plant} p={p} />)}
+              </div>
+              {/* Aggregate blocks */}
+              {(cans || slugs) && (
+                <>
+                  <div style={{ height:1, background:D.border, marginBottom:10 }} />
+                  <div style={{ display:"grid", gridTemplateColumns: cans && slugs ? "1fr 1fr" : "1fr", gap:8 }}>
+                    {cans  && <PlantCard p={cans}  wide />}
+                    {slugs && <PlantCard p={slugs} wide />}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Tabs */}
         {(cur || hist.length > 0) && (
